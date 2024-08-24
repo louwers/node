@@ -1653,7 +1653,7 @@ Use this flag to disable top-level await in REPL.
 added: v22.0.0
 -->
 
-Disable exposition of [`WebSocket`][] on the global scope.
+Use this flag to disable experimental [`WebSocket`][] support.
 
 ### `--no-extra-info-on-fatal-exception`
 
