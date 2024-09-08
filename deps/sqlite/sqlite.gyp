@@ -14,7 +14,7 @@
       },
       'defines': [
         'SQLITE_ENABLE_SESSION',
-        'SQLITE_ENABLE_PREUPDATE_HOOK'
+        'SQLITE_ENABLE_PREUPDATE_HOOK',
       ],
       'include_dirs': ['.'],
       'sources': [
