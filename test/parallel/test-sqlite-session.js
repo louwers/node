@@ -382,10 +382,25 @@ suite('filter tables', () => {
     const applyChangeset = () => database2.applyChangeset(session.changeset(), {
       ...(options.filter ? { filter: options.filter } : {})
     });
-    if (options.apply) {
-      options.apply(applyChangeset);
-    } else {
-      applyChangeset();
+    let threw = false;
+    try {
+      if (options.apply) {
+        options.apply(applyChangeset);
+      } else {
+        applyChangeset();
+      }
+    } catch (err) {
+      threw = true;
+      if (options.error) {
+        t.assert.strictEqual(err, options.error);
+      } else if (options.expectError) {
+        t.assert.ok(err instanceof Error);
+      } else {
+        throw err; // unexpected
+      }
+    }
+    if (options.error || options.expectError) {
+      t.assert.strictEqual(threw, true);
     }
 
     t.assert.strictEqual(database2.prepare('SELECT * FROM data1').all().length, options.data1);
@@ -415,7 +430,8 @@ suite('filter tables', () => {
   test('database.createSession() - throw sometimes in filter callback', (t) => {
     testFilter(t, {
       filter: (tableName) => { if (tableName === 'data2') throw new Error(); else { return true; } },
-      data1: 0,
+      // partial changeset applied
+      data1: 3,
       data2: 0,
       expectError: true
     });

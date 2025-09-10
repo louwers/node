@@ -1650,6 +1650,8 @@ void Backup(const FunctionCallbackInfo<Value>& args) {
 struct ConflictCallbackContext {
   std::function<bool(std::string)> filterCallback;
   std::function<int(int)> conflictCallback;
+  bool filter_threw = false;
+  v8::Global<v8::Value> filter_exception;  // stored exception to rethrow
 };
 
 // the reason for using static functions here is that SQLite needs a
@@ -1663,9 +1665,11 @@ static int xConflict(void* pCtx, int eConflict, sqlite3_changeset_iter* pIter) {
 }
 
 static int xFilter(void* pCtx, const char* zTab) {
-    auto ctx = static_cast<ConflictCallbackContext*>(pCtx);
-    if (!ctx->filterCallback) return 1;
-    return ctx->filterCallback(zTab) ? 1 : 0;
+  auto ctx = static_cast<ConflictCallbackContext*>(pCtx);
+  // If an earlier invocation threw, short-circuit and exclude subsequent all tables
+  if (ctx->filter_threw) return 0;
+  if (!ctx->filterCallback) return 1;
+  return ctx->filterCallback(zTab) ? 1 : 0;
 }
 
 void DatabaseSync::ApplyChangeset(const FunctionCallbackInfo<Value>& args) {
@@ -1743,18 +1747,25 @@ void DatabaseSync::ApplyChangeset(const FunctionCallbackInfo<Value>& args) {
 
       Local<Function> filterFunc = filterValue.As<Function>();
 
-      context.filterCallback = [env, filterFunc](std::string item) -> bool {
-        // TODO(@jasnell): The use of ToLocalChecked here means that if
-        // the filter function throws an error the process will crash.
-        // The filterCallback should be updated to avoid the check and
-        // propagate the error correctly.
-        Local<Value> argv[] = {String::NewFromUtf8(env->isolate(),
-                                                   item.c_str(),
-                                                   NewStringType::kNormal)
-                                   .ToLocalChecked()};
-        Local<Value> result =
-            filterFunc->Call(env->context(), Null(env->isolate()), 1, argv)
-                .ToLocalChecked();
+      context.filterCallback = [env, filterFunc, &context](std::string item) -> bool {
+        if (context.filter_threw) return false;  // short-circuit
+        TryCatch try_catch(env->isolate());
+        MaybeLocal<String> maybeStr = String::NewFromUtf8(env->isolate(),
+                                                          item.c_str(),
+                                                          NewStringType::kNormal);
+        Local<String> tblName;
+        if (!maybeStr.ToLocal(&tblName)) {
+          context.filter_threw = true;
+          context.filter_exception.Reset(env->isolate(), try_catch.Exception());
+          return false;
+        }
+        Local<Value> argv[] = { tblName };
+        Local<Value> result;
+        if (!filterFunc->Call(env->context(), Null(env->isolate()), 1, argv).ToLocal(&result)) {
+          context.filter_threw = true;
+          context.filter_exception.Reset(env->isolate(), try_catch.Exception());
+          return false;
+        }
         return result->BooleanValue(env->isolate());
       };
     }
@@ -1768,6 +1779,12 @@ void DatabaseSync::ApplyChangeset(const FunctionCallbackInfo<Value>& args) {
       xFilter,
       xConflict,
       static_cast<void*>(&context));
+  // If the filter callback threw, rethrow the stored exception and abort.
+  if (context.filter_threw) {
+    env->isolate()->ThrowException(context.filter_exception.Get(env->isolate()));
+  context.filter_exception.Reset();
+    return;
+  }
   if (r == SQLITE_OK) {
     args.GetReturnValue().Set(true);
     return;

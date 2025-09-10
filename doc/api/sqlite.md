@@ -386,8 +386,11 @@ added:
 
 * `changeset` {Uint8Array} A binary changeset or patchset.
 * `options` {Object} The configuration options for how the changes will be applied.
-  * `filter` {Function} Skip changes that, when targeted table name is supplied to this function, return a truthy value.
-    By default, all changes are attempted.
+  * `filter` {Function} Returning a truthy value when changes to the supplied table
+    should be attempted. By default, changes for all tables are attempted.
+    Note: when an exception is thrown in this callback, a partial changeset may
+    be applied. Avoid throwing exceptions in this callback or wrap `applyChangeset`
+    in a transaction if this is undesirable.
   * `onConflict` {Function} A function that determines how to handle conflicts. The function receives one argument,
     which can be one of the following values:
 
